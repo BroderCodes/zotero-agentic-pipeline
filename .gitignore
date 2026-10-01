@@ -1,0 +1,56 @@
+# Environment & Secrets
+.env
+*.env
+.env.*
+*.secret
+*.pem
+*.key
+credentials.json
+token.json
+
+# Data & Cloud Storage (synced via Google Drive)
+papers
+notes
+inbox
+papers_index.json
+papers_index.parquet
+*.pdf
+
+# System & OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Temporary files
+*.tmp
+*.bak
+*~
