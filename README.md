@@ -46,7 +46,7 @@ Before running the workflow for the first time, configure Zotero and your local 
    - Save the file directly into this repository as `references/canonical_library.json`.
 2. **Configure Your Taxonomy:**
    - Open `config/taxonomy.py`.
-   - Replace the example dictionary with your own research projects and keywords. The Python bridge script uses these keywords to read the PDF and automatically tag your papers!
+   - Replace the example dictionary with your own research projects and keywords. The Python bridge script uses these keywords to read the PDF and automatically tag your papers using regex matching (future updates will include a switch to LLM API calls).
 3. **Configure Zotero Attanger (Optional but Recommended):**
    - Set up the Zotero Attanger plugin to automatically move and rename your PDFs from Zotero into your centralized `papers/` cloud storage folder.
 
