@@ -59,7 +59,7 @@ To ingest new papers into the library seamlessly without duplication:
 ### 1. Capture & Link (The Zotero Layer)
 1. **Download:** Save a PDF to your Downloads folder (or any other source folder, specified in the Zotero Attanger plugin).
 2. **Ingest to Zotero:** Drag and drop the PDF into Zotero. 
-   * *Zotero's built-in engine reads the text, queries Crossref/Google Scholar, and generates pristine publisher metadata (Title, Authors, DOI).*
+   * *Zotero's built-in engine reads the text, queries Crossref/Google Scholar, and generates publisher metadata (Title, Authors, DOI).*
 3. **Move to Drive:** Right-click the item in Zotero and select "Rename and Move" (using the **Zotero Attanger** plugin). 
    * *Attanger automatically moves the PDF to your Google Drive `papers/` folder and replaces Zotero's internal attachment with a lightweight link.*
 4. **Auto-Export:** The **Better BibTeX** plugin instantly detects the new item, generates a clean citekey (e.g. `mustermann2022mouse`), and auto-updates `references/canonical_library.json` in the background.
@@ -99,7 +99,7 @@ The Master Manifest is a lightweight catalog of the entire library designed for 
 ```
 
 ### 2. Individual Markdown Notes (`notes/[citekey].md`)
-Each paper has a dedicated Markdown note pre-populated with YAML frontmatter. Because the filenames match the Zotero citekey perfectly, Obsidian links and AI agents can seamlessly reference citations:
+Each paper has a dedicated Markdown note pre-populated with YAML frontmatter. Because the filenames match the Zotero citekey, Obsidian links and AI agents can seamlessly reference citations:
 
 ```yaml
 ---
