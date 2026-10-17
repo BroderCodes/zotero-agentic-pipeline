@@ -14,10 +14,10 @@ A streamlined, AI-ready scientific literature repository toolkit connecting Zote
   - Contains all physical PDFs and Markdown notes, fully synced and backed up without cluttering the local Git repository. Note: make the folder available offline!
 - **Note-Taking:** Obsidian (or Logseq/VS Code)
   - To view and edit the AI-generated Markdown notes (with yaml metadata).
-- **Automation Layer:** Python 3 (pandas, pyarrow)
-  - Bridges Zotero's metadata with the AI manifest and Obsidian vault using custom classification logic (`taxonomy.py`).
+- **Automation & Embedding Layer:** Python 3 (`pandas`, `pyarrow`, `duckdb`, `sentence-transformers`)
+  - Bridges Zotero's metadata with the AI manifest and Obsidian vault using custom classification logic (`config/taxonomy.py`) and local scientific embeddings (`allenai/specter2_base`).
 - **Agent Layer:** Your favorite out-of-the box or custom agent
-  - To interact with papers_index.json and the md notes. Use it however you like to build out your knowledge base.
+  - Interacts with `papers_index.json`, queries `papers_index.parquet` via DuckDB + SPECTER2 semantic search (`scripts/search_library.py`), and reads/updates the Markdown notes and PDFs.
 
 ---
 
@@ -32,6 +32,7 @@ This repository acts as the **bridge** between a human-facing citation manager (
   - `papers/`: All PDFs stored completely flat.
   - `notes/`: Markdown note files matching the Zotero citekeys (`[citekey].md`).
   - `papers_index.json`: The AI-readable Master Corpus Manifest.
+  - `papers_index.parquet`: Columnar manifest enriched with abstracts and 768-d `allenai/specter2_base` vectors for instant DuckDB semantic search.
 
 ---
 
@@ -73,10 +74,27 @@ Once the paper is safely in Zotero and Google Drive, run the bridge script to sy
 
 **What the script does behind the scenes:**
 1. It reads Zotero's JSON export and spots the brand-new citekey.
-2. It silently reads the first 2 pages of the linked PDF in Google Drive.
-3. It runs the text through `taxonomy.py` to automatically categorize the paper into your projects.
-4. It appends the pristine metadata and citekey to `papers_index.json`.
-5. It generates a brand-new Markdown stub in your `notes/` folder, pre-filled with YAML frontmatter.
+2. It pulls the abstract from Zotero (or extracts it from the first 2 pages of the PDF in Google Drive).
+3. It runs Title + Abstract + PDF text through `config/taxonomy.py` to automatically categorize the paper into your projects.
+4. It appends the metadata and citekey to `papers_index.json` and incrementally embeds the new paper with `allenai/specter2_base` into `papers_index.parquet`.
+5. It generates a brand-new Markdown stub in your `notes/` folder, pre-filled with YAML frontmatter and the abstract.
+
+---
+
+## Semantic Search (SPECTER2 + DuckDB)
+
+Agents (or you) can search across your library locally and offline using `scripts/search_library.py`:
+
+```bash
+# Hybrid semantic (SPECTER2) + keyword search:
+~/miniconda3/bin/python scripts/search_library.py "how do CAR-T therapies target solid tumors?"
+
+# Filter by project and publication year:
+~/miniconda3/bin/python scripts/search_library.py "mRNA vaccine efficacy" --project Treatments --year-min 2020
+
+# Find papers most similar to a specific paper (instant vector lookup):
+~/miniconda3/bin/python scripts/search_library.py --similar mustermann2022mouse
+```
 
 ---
 
@@ -118,10 +136,10 @@ file: papers/Mustermann-2022-Mouse-Work.pdf
 # Some really cool mouse work
 
 **Authors:** Mustermann F, Musterfrau S  
-**Projects:** Mouse_Work
+**Projects:** Mouse_Methods
 
 ## Abstract
-(Fetch from Zotero or web if needed)
+(Automatically populated from Zotero or PDF text)
 
 ## Notes
 - 
@@ -131,6 +149,8 @@ file: papers/Mustermann-2022-Mouse-Work.pdf
 
 ## Utility Scripts Overview
 
-- `scripts/zotero_bridge.py`: Ingestion pipeline connecting Zotero to the AI manifest and Markdown vault.
+- `scripts/zotero_bridge.py`: Ingestion pipeline connecting Zotero to the AI manifest, SPECTER2 embeddings, and Markdown vault (`--reclassify` re-runs taxonomy tagging across the full library).
+- `scripts/search_library.py`: Hybrid semantic (`allenai/specter2_base`) + keyword search across `papers_index.parquet` via DuckDB.
+- `scripts/embed_library.py`: Incremental SPECTER2 embedding builder for `papers_index.parquet` (`--force` rebuilds all embeddings from scratch).
 - `scripts/reconcile_manifest_keys.py`: Reconciles a newly generated Zotero BBT library back to the master manifest by matching DOIs and PDF filenames.
 - `scripts/sync_obsidian_stubs.py`: Renames and safely updates the YAML headers of existing Markdown notes when citekeys change.

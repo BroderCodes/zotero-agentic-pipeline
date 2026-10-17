@@ -12,9 +12,15 @@ token.json
 papers
 notes
 inbox
+memos/
+references/
 papers_index.json
 papers_index.parquet
 *.pdf
+*.ris
+*.bib
+*.md
+!README.md
 
 # System & OS
 .DS_Store
