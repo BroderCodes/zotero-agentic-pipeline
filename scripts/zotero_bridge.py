@@ -172,8 +172,33 @@ def classify_text(text="", title="", abstract=""):
     return ["Unclassified"]
 
 
+PROTECTED_STATUSES = {"verified", "read"}
+
+
+def is_protected_note_content(content):
+    """Returns True if the YAML frontmatter has status: verified or status: read."""
+    parts = re.split(r'^(?:---|\.\.\.)\r?\n', content, maxsplit=2, flags=re.MULTILINE)
+    if len(parts) >= 3:
+        fm = parts[1]
+        m = re.search(r'^status:\s*["\']?([a-zA-Z0-9_\-]+)["\']?\s*$', fm, flags=re.MULTILINE | re.IGNORECASE)
+        if m and m.group(1).strip().lower() in PROTECTED_STATUSES:
+            return True
+    return False
+
+
+def is_protected_note_file(note_path):
+    """Returns True if note_path exists and has status: verified or status: read."""
+    if not os.path.exists(note_path):
+        return False
+    try:
+        with open(note_path, 'r', encoding='utf-8') as f:
+            return is_protected_note_content(f.read())
+    except Exception:
+        return False
+
+
 def create_note_stub(citekey, p_data, notes_dir, abstract="", overwrite=False):
-    """Creates or updates the Obsidian Markdown note stub with Zotero abstract and projects."""
+    """Creates or updates the Obsidian Markdown note stub. Never touches notes with status: verified or read."""
     note_path = os.path.join(notes_dir, f"{citekey}.md")
     cleaned_abs = clean_abstract(abstract or p_data.get('abstract', ''))
     abstract_block = cleaned_abs if cleaned_abs else "(Abstract not extracted - fetch from Zotero or web if needed)"
@@ -182,13 +207,22 @@ def create_note_stub(citekey, p_data, notes_dir, abstract="", overwrite=False):
     date_str = datetime.datetime.now().strftime('%Y-%m-%d')
 
     if os.path.exists(note_path):
-        if not overwrite:
-            return
-        # Safe in-place update preserving user notes in body
         try:
             with open(note_path, 'r', encoding='utf-8') as f:
                 content = f.read()
+        except Exception as e:
+            print(f"Warning: could not read note {note_path}: {e}")
+            return False
 
+        # Hard guard: NEVER modify a note whose status is 'verified' or 'read'
+        if is_protected_note_content(content):
+            return False
+
+        if not overwrite:
+            return False
+
+        # Safe in-place update preserving user notes in body
+        try:
             # 1. Update YAML frontmatter projects & file
             parts = re.split(r'^(?:---|\.\.\.)\r?\n', content, maxsplit=2, flags=re.MULTILINE)
             if len(parts) >= 3:
@@ -234,10 +268,11 @@ def create_note_stub(citekey, p_data, notes_dir, abstract="", overwrite=False):
 
                 with open(note_path, 'w', encoding='utf-8') as f:
                     f.write(f"---\n{fm}---\n{body}")
-                return
+                return True
         except Exception as e:
             print(f"Warning: could not update note {note_path}: {e}")
-            return
+            return False
+        return False
 
     yaml = f"""---
 id: {citekey}
@@ -388,6 +423,10 @@ def reclassify_library(manifest_path, canonical_path, notes_dir, drive_base):
         if not z_abstract and pdf_text:
             z_abstract = extract_abstract_fallback(pdf_text)
 
+        note_path = os.path.join(notes_dir, f"{key}.md")
+        if is_protected_note_file(note_path):
+            return p.get('projects', ['Unclassified'])
+
         title = p.get('title', '') or z_item.get('title', '')
         new_projects = classify_text(text=pdf_text, title=title, abstract=z_abstract)
         p['projects'] = new_projects
@@ -433,12 +472,14 @@ def run_bridge(manifest_path, canonical_path, notes_dir, drive_base):
                 pdf_abs_path, rel_file = find_pdf_in_drive(drive_base, item, citekey, drive_index=drive_index)
                 if rel_file:
                     existing['file'] = rel_file
-                    text = extract_text_from_pdf(pdf_abs_path)
-                    if not z_abstract and text:
-                        z_abstract = extract_abstract_fallback(text)
-                    existing['projects'] = classify_text(text=text, title=title, abstract=z_abstract)
+                    note_path = os.path.join(notes_dir, f"{citekey}.md")
+                    if not is_protected_note_file(note_path):
+                        text = extract_text_from_pdf(pdf_abs_path)
+                        if not z_abstract and text:
+                            z_abstract = extract_abstract_fallback(text)
+                        existing['projects'] = classify_text(text=text, title=title, abstract=z_abstract)
+                        create_note_stub(citekey, existing, notes_dir, abstract=z_abstract, overwrite=True)
                     updated_items_count += 1
-                    create_note_stub(citekey, existing, notes_dir, abstract=z_abstract, overwrite=True)
             continue
 
         # 1. Get the PDF file path

@@ -14,10 +14,10 @@ A streamlined, AI-ready scientific literature repository toolkit connecting Zote
   - Contains all physical PDFs and Markdown notes, fully synced and backed up without cluttering the local Git repository. Note: make the folder available offline!
 - **Note-Taking:** Obsidian (or Logseq/VS Code)
   - To view and edit the AI-generated Markdown notes (with yaml metadata).
-- **Automation & Embedding Layer:** Python 3 (`pandas`, `pyarrow`, `duckdb`, `sentence-transformers`)
-  - Bridges Zotero's metadata with the AI manifest and Obsidian vault using custom classification logic (`config/taxonomy.py`) and local scientific embeddings (`allenai/specter2_base`).
+- **Automation & Embedding Layer:** Python 3 (`pandas`, `pyarrow`, `duckdb`, `transformers`, `adapters`)
+  - Bridges Zotero's metadata with the AI manifest and Obsidian vault using custom classification logic (`config/taxonomy.py`) and local scientific embeddings (`allenai/specter2_aug2023refresh_base` paired with `proximity`, `adhoc_query`, and `classification` task adapters).
 - **Agent Layer:** Your favorite out-of-the box or custom agent
-  - Interacts with `papers_index.json`, queries `papers_index.parquet` via DuckDB + SPECTER2 semantic search (`scripts/search_library.py`), and reads/updates the Markdown notes and PDFs.
+  - Interacts with `papers_index.json`, queries `papers_index.parquet` via DuckDB + SPECTER2 semantic search (`scripts/search_library.py`), and reads/updates the Markdown notes and PDFs (while protecting curated notes marked `status: verified` or `status: read`).
 
 ---
 
@@ -32,7 +32,7 @@ This repository acts as the **bridge** between a human-facing citation manager (
   - `papers/`: All PDFs stored completely flat.
   - `notes/`: Markdown note files matching the Zotero citekeys (`[citekey].md`).
   - `papers_index.json`: The AI-readable Master Corpus Manifest.
-  - `papers_index.parquet`: Columnar manifest enriched with abstracts and 768-d `allenai/specter2_base` vectors for instant DuckDB semantic search.
+  - `papers_index.parquet`: Columnar manifest enriched with abstracts and 768-d SPECTER2 `proximity` (`embedding`) and `classification` (`embedding_clf`) vectors for instant DuckDB semantic search and triage.
 
 ---
 

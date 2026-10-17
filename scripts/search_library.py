@@ -1,6 +1,13 @@
 #!/usr/bin/env python3
 """
-search_library.py - Hybrid Semantic (SPECTER2) + Keyword Search via DuckDB.
+search_library.py - Hybrid Semantic (SPECTER2 Adapters + L2 Distance) & Keyword Search via DuckDB.
+
+Uses AllenAI's recommended adapter pairings:
+  - Short text queries: encoded with `allenai/specter2_aug2023refresh_adhoc_query`
+  - Candidate papers:   encoded with `allenai/specter2_aug2023refresh` (proximity adapter)
+  - Paper-to-paper (`--similar`): compares proximity embeddings directly
+  - Distance metric:    Raw L2 (Euclidean) distance on unnormalized [CLS] embeddings,
+                        matching SciRepEval's triplet loss objective.
 
 Examples:
   # Natural language semantic + keyword search:
@@ -19,7 +26,7 @@ import os
 import re
 import sys
 
-MODEL_NAME = "allenai/specter2_base"
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 STOPWORDS = {
     "a", "an", "and", "are", "as", "at", "be", "by", "do", "does", "for", "from",
@@ -30,26 +37,20 @@ STOPWORDS = {
 
 
 def encode_query(query_text):
-    os.environ["TOKENIZERS_PARALLELISM"] = "false"
-    import torch
-    from sentence_transformers import SentenceTransformer
+    """Encodes a short natural-language search query using the `adhoc_query` adapter."""
+    from scripts.embed_library import encode_batches, load_specter2_model
 
-    device = "mps" if torch.backends.mps.is_available() else "cpu"
-    try:
-        model = SentenceTransformer(
-            MODEL_NAME, device=device, trust_remote_code=False, local_files_only=True
-        )
-    except Exception:
-        model = SentenceTransformer(
-            MODEL_NAME, device=device, trust_remote_code=False
-        )
-    vec = model.encode(
+    tokenizer, model, device = load_specter2_model(adapters_to_load=("adhoc_query",))
+    vecs = encode_batches(
+        tokenizer,
+        model,
+        device,
         [query_text],
-        normalize_embeddings=True,
-        convert_to_numpy=True,
-        show_progress_bar=False,
-    )[0]
-    return vec
+        adapter_name="adhoc_query",
+        batch_size=1,
+        show_progress=False,
+    )
+    return vecs[0]
 
 
 def run_search(
@@ -64,6 +65,7 @@ def run_search(
 ):
     import duckdb
     import numpy as np
+    import pandas as pd
 
     real_parquet = os.path.realpath(parquet_path)
     if not os.path.exists(real_parquet):
@@ -72,7 +74,6 @@ def run_search(
 
     con = duckdb.connect()
 
-    # Load candidate rows using DuckDB SQL filtering
     where_clauses = ["embedding IS NOT NULL"]
     params = []
 
@@ -97,11 +98,10 @@ def run_search(
         print("No matching papers found for the given filters.")
         return
 
-    # Stack normalized 768-d vectors into a contiguous float32 matrix
+    # Stack unnormalized 768-d proximity embeddings into a float32 matrix
     matrix = np.vstack(df["embedding"].values).astype(np.float32)
 
     if similar_to:
-        # Look up the target paper's embedding directly from the parquet file
         target_df = con.execute(
             f"SELECT citekey, title, embedding FROM read_parquet('{real_parquet}') WHERE citekey = ? OR id = ?",
             [similar_to, similar_to],
@@ -110,36 +110,44 @@ def run_search(
             print(f"Error: citekey '{similar_to}' not found in {parquet_path}.", file=sys.stderr)
             sys.exit(1)
         q_vec = np.asarray(target_df.iloc[0]["embedding"], dtype=np.float32)
-        semantic_scores = matrix @ q_vec
-        hybrid_scores = semantic_scores
+        # Raw Euclidean (L2) distance per AllenAI SPECTER2 specification
+        l2_dists = np.linalg.norm(matrix - q_vec, axis=1)
+        effective_dists = l2_dists
     else:
         q_vec = encode_query(query)
-        semantic_scores = matrix @ q_vec
+        l2_dists = np.linalg.norm(matrix - q_vec, axis=1)
 
-        # Compute lightweight lexical keyword boost on Title + Abstract
+        # Lightweight lexical keyword bonus (reduces effective L2 distance when exact terms match)
         keywords = [
             w.lower()
             for w in re.findall(r"[a-zA-Z0-9\-]{3,}", query or "")
             if w.lower() not in STOPWORDS
         ]
-        lexical_boost = np.zeros(len(df), dtype=np.float32)
+        lexical_bonus = np.zeros(len(df), dtype=np.float32)
         if keywords:
             titles_low = df["title"].fillna("").str.lower()
             abs_low = df["abstract"].fillna("").str.lower()
             for kw in keywords:
                 in_title = titles_low.str.contains(re.escape(kw), regex=True).to_numpy(dtype=np.float32)
                 in_abs = abs_low.str.contains(re.escape(kw), regex=True).to_numpy(dtype=np.float32)
-                lexical_boost += 0.035 * in_title + 0.015 * in_abs
-            lexical_boost = np.clip(lexical_boost, 0.0, 0.15)
+                lexical_bonus += 0.35 * in_title + 0.15 * in_abs
+            lexical_bonus = np.clip(lexical_bonus, 0.0, 1.5)
 
-        hybrid_scores = semantic_scores + lexical_boost
+        effective_dists = l2_dists - lexical_bonus
 
-    df["score"] = hybrid_scores
-    df["semantic_score"] = semantic_scores
+    # Lower effective L2 distance = higher relevance; convert to monotonic similarity score in (0, 1]
+    df["l2_distance"] = l2_dists
+    df["effective_dist"] = effective_dists
+    df["score"] = 1.0 / (1.0 + np.maximum(effective_dists, 0.0) / 10.0)
+
     if similar_to:
         df = df[df["citekey"] != similar_to]
 
-    top_df = df.sort_values("score", ascending=False).head(top_k)
+    top_df = (
+        df.sort_values("effective_dist", ascending=True)
+        .drop_duplicates(subset=["citekey"], keep="first")
+        .head(top_k)
+    )
 
     results = []
     for _, row in top_df.iterrows():
@@ -157,6 +165,7 @@ def run_search(
                 "note": f"notes/{row['citekey']}.md",
                 "projects": projs_list,
                 "score": round(float(row["score"]), 4),
+                "l2_distance": round(float(row["l2_distance"]), 3),
                 "abstract_snippet": (abs_str[:320] + "...") if len(abs_str) > 320 else abs_str,
             }
         )
@@ -170,7 +179,10 @@ def run_search(
     for rank, r in enumerate(results, 1):
         auth_str = ", ".join(r["authors"]) + (" et al." if len(r["authors"]) == 5 else "")
         proj_str = ", ".join(r["projects"])
-        print(f"\n{rank}. [{r['citekey']}] ({r['year'] or 'n.d.'}) | Score: {r['score']:.3f} | Projects: {proj_str}")
+        print(
+            f"\n{rank}. [{r['citekey']}] ({r['year'] or 'n.d.'}) | "
+            f"Score: {r['score']:.3f} (L2: {r['l2_distance']:.2f}) | Projects: {proj_str}"
+        )
         print(f"   Title:   {r['title']}")
         if auth_str:
             print(f"   Authors: {auth_str}")
@@ -180,9 +192,7 @@ def run_search(
 
 
 if __name__ == "__main__":
-    import pandas as pd
-
-    parser = argparse.ArgumentParser(description="Hybrid SPECTER2 + DuckDB Literature Search")
+    parser = argparse.ArgumentParser(description="Hybrid SPECTER2 Adapter + DuckDB Literature Search")
     parser.add_argument("query", nargs="?", default=None, help="Natural language search query")
     parser.add_argument("--similar", default=None, help="Find papers similar to a given citekey")
     parser.add_argument("--project", default=None, help="Filter by project name (e.g. Treatments)")
