@@ -13,7 +13,7 @@ papers
 notes
 inbox
 memos/
-references/
+/references/
 papers_index.json
 papers_index.parquet
 *.pdf
@@ -21,6 +21,8 @@ papers_index.parquet
 *.bib
 *.md
 !README.md
+!.agents/**
+!.agents/**/*.md
 
 # System & OS
 .DS_Store
